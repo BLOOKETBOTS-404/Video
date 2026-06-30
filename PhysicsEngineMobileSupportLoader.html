@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Roblox Web Player</title>
+<style>
+  body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #1a1a1a; color: #fff; touch-action: none; }
+  canvas { display: block; touch-action: none; }
+  #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+  .screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #1a1a1a; z-index: 10; pointer-events: auto; }
+  .hidden { display: none !important; }
+  .card { background: #2a2a2a; padding: 30px; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); width: 350px; max-width: 90vw; }
+  .card h1 { color: #f5a623; text-align: center; margin: 0 0 20px 0; font-size: 24px; }
+  .input-group { margin-bottom: 15px; }
+  .input-group label { display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; }
+  .input-group input { width: 100%; padding: 10px; background: #1a1a1a; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; }
+  .btn { width: 100%; background: #f5a623; color: #000; border: none; padding: 12px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 4px; margin-top: 10px; }
+  .btn.blue { background: #00aaff; }
+  .btn:hover { opacity: 0.9; }
+  .msg { color: #ff5050; text-align: center; font-size: 12px; margin-top: 10px; min-height: 15px; }
+  #menu-screen { justify-content: flex-start; padding-top: 50px; overflow-y: auto; }
+  #menu-screen h1 { color: #f5a623; margin-bottom: 30px; }
+  #games-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; width: 80%; max-width: 1200px; padding-bottom: 50px; }
+  .game-card { background: #2a2a2a; padding: 20px; border-radius: 8px; display: flex; flex-direction: column; }
+  .game-card h3 { margin: 0 0 5px 0; color: #fff; }
+  .game-card p { margin: 0 0 15px 0; color: #888; font-size: 12px; }
+  .stars { color: #f5a623; font-size: 14px; margin-bottom: 10px; }
+  .rating-input { display: flex; gap: 5px; margin-bottom: 10px; }
+  .rating-input span { cursor: pointer; color: #555; font-size: 18px; }
+  .rating-input span.active { color: #f5a623; }
+  #game-hud { position: absolute; top: 0; left: 0; width: 100%; pointer-events: none; display: flex; justify-content: space-between; padding: 20px; box-sizing: border-box; }
+  #hud-info { background: rgba(0,0,0,0.5); padding: 10px 15px; border-radius: 4px; font-size: 12px; }
+  #leave-btn { pointer-events: auto; background: #ff5050; color: #fff; border: none; padding: 10px 20px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+  #crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 6px; height: 6px; background: #fff; border-radius: 50%; mix-blend-mode: difference; }
+  
+  /* Mobile Controls */
+  #mobile-controls { position: absolute; bottom: 0; left: 0; width: 100%; height: 250px; pointer-events: none; z-index: 5; }
+  #joystick-base { position: absolute; bottom: 40px; left: 40px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.3); pointer-events: auto; }
+  #joystick-knob { position: absolute; top: 35px; left: 35px; width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,0.4); pointer-events: none; }
+  #jump-btn { position: absolute; bottom: 60px; right: 50px; width: 90px; height: 90px; border-radius: 50%; background: rgba(0, 170, 255, 0.4); border: 2px solid rgba(0, 170, 255, 0.8); color: white; font-weight: bold; display: flex; align-items: center; justify-content: center; pointer-events: auto; user-select: none; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="auth-screen" class="screen">
+    <div class="card">
+      <h1>ROBLOX WEB</h1>
+      <div class="input-group"><label>Username</label><input type="text" id="username"></div>
+      <div class="input-group"><label>Password</label><input type="password" id="password"></div>
+      <div class="msg" id="auth-msg"></div>
+      <button class="btn" onclick="signIn()">Sign In</button>
+      <button class="btn blue" onclick="signUp()">Sign Up</button>
+    </div>
+  </div>
+  <div id="menu-screen" class="screen hidden">
+    <h1>GAME BROWSER</h1>
+    <div id="games-list"></div>
+  </div>
+  <div id="game-hud" class="hidden">
+    <div id="hud-info">WASD: Move | Space: Jump | Shift: Sprint</div>
+    <button id="leave-btn" onclick="leaveGame()">Leave Game</button>
+  </div>
+  <div id="crosshair" class="hidden"></div>
+  
+  <div id="mobile-controls" class="hidden">
+    <div id="joystick-base">
+      <div id="joystick-knob"></div>
+    </div>
+    <div id="jump-btn">JUMP</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+const API_URL = 'https://script.google.com/macros/s/AKfycbwdWiEBdxXwFmoydaAmC676YrO0_70JCmn840dThclF708xFldAdo0Qot6EksDLoRje/exec'; // GAME SERVER
+
+// Mobile Detection
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window && window.innerWidth < 1024);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x88aacc);
+scene.fog = new THREE.Fog(0x88aacc, 100, 500);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.rotation.order = 'YXZ';
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+dirLight.position.set(50, 100, 50);
+dirLight.castShadow = true;
+scene.add(dirLight);
+document.body.appendChild(renderer.domElement);
+
+let currentUser = null;
+let currentGameId = null;
+let colliders = [];
+let spawnPoint = new THREE.Vector3(0, 5, 0);
+let isGameLoaded = false;
+let networkTimer = null;
+const otherPlayers = {};
+const player = { pos: new THREE.Vector3(0, 5, 0), vel: new THREE.Vector3(), yaw: 0, pitch: 0, onGround: false, height: 1.8, width: 0.8 };
+
+// Mobile state
+let joystickVec = { x: 0, y: 0 };
+let joyTouchId = null;
+let camTouchId = null;
+let joyStartX = 0, joyStartY = 0;
+let lastCamX = 0, lastCamY = 0;
+
+// Universal JSONP GET Request
+function apiGet(action, params) {
+  return new Promise((resolve) => {
+    const cbName = 'cb_' + Math.random().toString(36).substr(2, 9);
+    let resolved = false;
+    
+    const cleanup = () => {
+      if (resolved) return;
+      resolved = true;
+      delete window[cbName];
+      const s = document.getElementById(cbName);
+      if (s) s.remove();
+    };
+    
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolve({success: false, error: 'Timeout'});
+        cleanup();
+      }
+    }, 5000);
+    
+    window[cbName] = function(data) {
+      if (resolved) return;
+      resolve(data);
+      cleanup();
+      clearTimeout(timeout);
+    };
+    
+    let url = API_URL + '?action=' + action + '&callback=' + cbName + '&_ts=' + Date.now();
+    for (let k in params) {
+      if (params[k] !== undefined && params[k] !== null) {
+        url += '&' + k + '=' + encodeURIComponent(params[k]);
+      }
+    }
+    
+    const script = document.createElement('script');
+    script.id = cbName;
+    script.src = url;
+    script.onerror = () => { 
+      if (!resolved) {
+        resolve({success: false, error: 'Network error'}); 
+        cleanup(); 
+        clearTimeout(timeout);
+      }
+    };
+    document.body.appendChild(script);
+  });
+}
+
+window.signIn = async function() {
+  const u = document.getElementById('username').value;
+  const p = document.getElementById('password').value;
+  const res = await apiGet('signin', { username: u, password: p });
+  if (res.success) { currentUser = u; showMenu(); } 
+  else document.getElementById('auth-msg').innerText = res.error;
+}
+
+window.signUp = async function() {
+  const u = document.getElementById('username').value;
+  const p = document.getElementById('password').value;
+  const res = await apiGet('signup', { username: u, password: p });
+  if (res.success) { currentUser = u; showMenu(); } 
+  else document.getElementById('auth-msg').innerText = res.error;
+}
+
+async function showMenu() {
+  document.getElementById('auth-screen').classList.add('hidden');
+  document.getElementById('menu-screen').classList.remove('hidden');
+  const res = await apiGet('getGames', {});
+  const list = document.getElementById('games-list');
+  list.innerHTML = '';
+  if (res.success) {
+    res.games.forEach(g => {
+      const card = document.createElement('div');
+      card.className = 'game-card';
+      card.innerHTML = `
+        <h3>${g.name}</h3>
+        <p>Creator: ${g.creator} | ID: ${g.id}</p>
+        <div class="stars">Rating: ${g.avgRating} / 5 (${g.votes} votes)</div>
+        <div class="rating-input" id="rating-${g.id}">
+          <span data-val="1">★</span><span data-val="2">★</span><span data-val="3">★</span><span data-val="4">★</span><span data-val="5">★</span>
+        </div>
+        <button class="btn blue" onclick="playGame(${g.id})">Play</button>
+      `;
+      list.appendChild(card);
+      
+      const ratingDiv = document.getElementById(`rating-${g.id}`);
+      ratingDiv.querySelectorAll('span').forEach(span => {
+        span.onclick = () => rateGame(g.id, span.dataset.val, ratingDiv);
+      });
+    });
+  }
+}
+
+window.rateGame = async function(id, stars, div) {
+  const res = await apiGet('rateGame', { username: currentUser, gameId: id, stars: parseInt(stars) });
+  if (res.success) {
+    div.querySelectorAll('span').forEach(s => s.classList.toggle('active', s.dataset.val <= stars));
+    showMenu(); 
+  }
+}
+
+window.playGame = async function(id) {
+  currentGameId = id;
+  const res = await apiGet('playGame', { id: id });
+  if (res.success) {
+    loadGame(res.game.data);
+    document.getElementById('menu-screen').classList.add('hidden');
+    document.getElementById('game-hud').classList.remove('hidden');
+    
+    if (isMobile) {
+      document.getElementById('mobile-controls').classList.remove('hidden');
+      document.getElementById('hud-info').innerText = "Joystick: Move | Drag Screen: Look";
+    } else {
+      document.getElementById('crosshair').classList.remove('hidden');
+      renderer.domElement.requestPointerLock();
+    }
+    
+    isGameLoaded = true;
+    networkTimer = setTimeout(networkUpdate, 1500); // Start multiplayer loop
+  } else {
+    alert("Failed to load game: " + res.error);
+  }
+}
+
+window.leaveGame = function() {
+  isGameLoaded = false;
+  clearTimeout(networkTimer); // Stop multiplayer loop
+  for (let id in otherPlayers) { scene.remove(otherPlayers[id].mesh); delete otherPlayers[id]; }
+  scene.children.forEach(child => { if (child.userData.isGameBlock) scene.remove(child); });
+  colliders = [];
+  document.getElementById('game-hud').classList.add('hidden');
+  document.getElementById('crosshair').classList.add('hidden');
+  document.getElementById('mobile-controls').classList.add('hidden');
+  showMenu();
+}
+
+function loadGame(physData) {
+  const data = JSON.parse(physData);
+  spawnPoint.set(data.spawn.x, data.spawn.y, data.spawn.z);
+  player.pos.copy(spawnPoint);
+  player.vel.set(0, 0, 0);
+
+  data.blocks.forEach(b => {
+    const geo = new THREE.BoxGeometry(b.s[0], b.s[1], b.s[2]);
+    const mat = new THREE.MeshLambertMaterial({ color: b.c });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(b.p[0], b.p[1], b.p[2]);
+    mesh.castShadow = true; mesh.receiveShadow = true;
+    mesh.userData.isGameBlock = true;
+    scene.add(mesh);
+    const min = new THREE.Vector3(b.p[0] - b.s[0]/2, b.p[1] - b.s[1]/2, b.p[2] - b.s[2]/2);
+    const max = new THREE.Vector3(b.p[0] + b.s[0]/2, b.p[1] + b.s[1]/2, b.p[2] + b.s[2]/2);
+    colliders.push({ min: min, max: max, type: b.t });
+  });
+}
+
+// Self-correcting multiplayer loop. Prevents request pile-up.
+async function networkUpdate() {
+  if (!isGameLoaded) return;
+  
+  // 1. Send my position
+  apiGet('updatePosition', { 
+    username: currentUser, gameId: currentGameId, 
+    x: player.pos.x.toFixed(2), y: player.pos.y.toFixed(2), z: player.pos.z.toFixed(2), 
+    yaw: player.yaw.toFixed(3), pitch: player.pitch.toFixed(3) 
+  });
+  
+  // 2. Get other players
+  const res = await apiGet('getPlayers', { gameId: currentGameId, username: currentUser });
+  
+  if (res.success) {
+    // Remove disconnected players
+    for (let id in otherPlayers) {
+      if (!res.players.find(p => p.username === id)) { 
+        scene.remove(otherPlayers[id].mesh); 
+        delete otherPlayers[id]; 
+      }
+    }
+    // Add/Update players
+    res.players.forEach(p => {
+      if (!otherPlayers[p.username]) {
+        const group = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.4), new THREE.MeshLambertMaterial({color: 0xff0000}));
+        body.position.y = 0.6;
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshLambertMaterial({color: 0xffcc00}));
+        head.position.y = 1.5;
+        group.add(body, head);
+        scene.add(group);
+        otherPlayers[p.username] = { mesh: group, targetPos: new THREE.Vector3(p.x, p.y, p.z), targetYaw: p.yaw };
+      } else {
+        otherPlayers[p.username].targetPos.set(p.x, p.y, p.z);
+        otherPlayers[p.username].targetYaw = p.yaw;
+      }
+    });
+  }
+  
+  // 3. Schedule next update ONLY after this one finishes
+  if (isGameLoaded) {
+    networkTimer = setTimeout(networkUpdate, 1500); 
+  }
+}
+
+let isLocked = false;
+const keys = {};
+const clock = new THREE.Clock();
+
+// Desktop Input
+document.addEventListener('keydown', e => { keys[e.code] = true; if (e.code === 'Space' && isLocked) e.preventDefault(); });
+document.addEventListener('keyup', e => keys[e.code] = false);
+renderer.domElement.addEventListener('click', () => { if (isGameLoaded && !isLocked && !isMobile) renderer.domElement.requestPointerLock(); });
+document.addEventListener('pointerlockchange', () => { isLocked = document.pointerLockElement === renderer.domElement; });
+document.addEventListener('mousemove', e => {
+  if (!isLocked) return;
+  player.yaw -= e.movementX * 0.002;
+  player.pitch -= e.movementY * 0.002;
+  player.pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, player.pitch));
+});
+
+// Mobile Touch Input Logic
+const joyBase = document.getElementById('joystick-base');
+const joyKnob = document.getElementById('joystick-knob');
+const jumpBtn = document.getElementById('jump-btn');
+
+if (isMobile) {
+  joyBase.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (joyTouchId !== null) return;
+    const t = e.changedTouches[0];
+    joyTouchId = t.identifier;
+    joyStartX = t.clientX;
+    joyStartY = t.clientY;
+  }, { passive: false });
+
+  jumpBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    keys['Space'] = true;
+  }, { passive: false });
+
+  jumpBtn.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    keys['Space'] = false;
+  }, { passive: false });
+
+  document.addEventListener('touchstart', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      // If touch is NOT on joystick or jump button, it's a camera drag
+      if (t.target !== joyBase && !joyBase.contains(t.target) && t.target !== jumpBtn) {
+        if (camTouchId === null && isGameLoaded) {
+          camTouchId = t.identifier;
+          lastCamX = t.clientX;
+          lastCamY = t.clientY;
+        }
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchmove', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier === joyTouchId) {
+        let dx = t.clientX - joyStartX;
+        let dy = t.clientY - joyStartY;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const maxDist = 40; // Max joystick travel radius
+        if (dist > maxDist) {
+          dx = (dx / dist) * maxDist;
+          dy = (dy / dist) * maxDist;
+        }
+        joyKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+        joystickVec.x = dx / maxDist;
+        joystickVec.y = -dy / maxDist; // Invert Y so up is forward
+      } else if (t.identifier === camTouchId) {
+        const dx = t.clientX - lastCamX;
+        const dy = t.clientY - lastCamY;
+        player.yaw -= dx * 0.005;
+        player.pitch -= dy * 0.005;
+        player.pitch = Math.max(-Math.PI/2 + 0.01, Math.min(Math.PI/2 - 0.01, player.pitch));
+        lastCamX = t.clientX;
+        lastCamY = t.clientY;
+      }
+    }
+  }, { passive: false });
+
+  document.addEventListener('touchend', (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier === joyTouchId) {
+        joyTouchId = null;
+        joystickVec = { x: 0, y: 0 };
+        joyKnob.style.transform = 'translate(0px, 0px)';
+      }
+      if (t.identifier === camTouchId) {
+        camTouchId = null;
+      }
+    }
+  }, { passive: false });
+}
+
+function checkCollision(x, y, z) {
+  const pMinX = x - player.width/2, pMaxX = x + player.width/2;
+  const pMinY = y, pMaxY = y + player.height;
+  const pMinZ = z - player.width/2, pMaxZ = z + player.width/2;
+  for (let c of colliders) {
+    if (pMaxX > c.min.x && pMinX < c.max.x && pMaxY > c.min.y && pMinY < c.max.y && pMaxZ > c.min.z && pMinZ < c.max.z) {
+      if (c.type === 'kill') return 'kill';
+      return 'solid';
+    }
+  }
+  return null;
+}
+
+function updatePhysics(dt) {
+  const speed = keys['ShiftLeft'] ? 12 : 6;
+  const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  let moveX = 0, moveZ = 0;
+
+  if (isMobile) {
+    // Use virtual joystick vector
+    moveX += forward.x * joystickVec.y;
+    moveZ += forward.z * joystickVec.y;
+    moveX += right.x * joystickVec.x;
+    moveZ += right.z * joystickVec.x;
+  } else {
+    // Use keyboard keys
+    if (keys['KeyW']) { moveX += forward.x; moveZ += forward.z; }
+    if (keys['KeyS']) { moveX -= forward.x; moveZ -= forward.z; }
+    if (keys['KeyD']) { moveX += right.x; moveZ += right.z; }
+    if (keys['KeyA']) { moveX -= right.x; moveZ -= right.z; }
+  }
+
+  const len = Math.sqrt(moveX*moveX + moveZ*moveZ);
+  if (len > 0) { moveX = (moveX / len) * speed * dt; moveZ = (moveZ / len) * speed * dt; }
+  
+  let newX = player.pos.x + moveX;
+  if (checkCollision(newX, player.pos.y, player.pos.z) !== 'solid') player.pos.x = newX;
+  let newZ = player.pos.z + moveZ;
+  if (checkCollision(player.pos.x, player.pos.y, newZ) !== 'solid') player.pos.z = newZ;
+  
+  if (keys['Space'] && player.onGround) { player.vel.y = 15; player.onGround = false; }
+  player.vel.y -= 45 * dt;
+  if (player.vel.y < -50) player.vel.y = -50;
+  
+  let newY = player.pos.y + player.vel.y * dt;
+  let collisionY = checkCollision(player.pos.x, newY, player.pos.z);
+  if (collisionY === 'solid') {
+    if (player.vel.y < 0) player.onGround = true;
+    player.vel.y = 0;
+  } else if (collisionY === 'kill') { die(); return; } 
+  else { player.pos.y = newY; player.onGround = false; }
+  if (player.pos.y < -50) die();
+}
+
+function die() { player.pos.copy(spawnPoint); player.vel.set(0, 0, 0); }
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (isGameLoaded && (isLocked || isMobile)) {
+    const steps = Math.ceil(dt / 0.016);
+    const subDt = dt / steps;
+    for (let i = 0; i < steps; i++) updatePhysics(subDt);
+    camera.rotation.set(player.pitch, player.yaw, 0);
+    camera.position.set(player.pos.x, player.pos.y + player.height - 0.2, player.pos.z);
+  }
+  for (let id in otherPlayers) {
+    let p = otherPlayers[id];
+    p.mesh.position.lerp(p.targetPos, 0.2);
+    p.mesh.rotation.y = p.targetYaw;
+  }
+  renderer.render(scene, camera);
+}
+
+animate();
+window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+</script>
+</body>
+</html>
